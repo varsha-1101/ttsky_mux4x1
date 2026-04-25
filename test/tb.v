@@ -1,49 +1,61 @@
-`default_nettype none
-`timescale 1ns / 1ps
+import cocotb
+from cocotb.triggers import Timer
 
-/* This testbench just instantiates the module and makes some convenient wires
-   that can be driven / tested by the cocotb test.py.
-*/
-module tb ();
 
-  // Dump the signals to a FST file. You can view it with gtkwave or surfer.
-  initial begin
-    $dumpfile("tb.fst");
-    $dumpvars(0, tb);
-    #1;
-  end
+@cocotb.test()
+async def test_mux_4x1(dut):
+    dut._log.info("Starting 4x1 MUX Simulation...")
 
-  // Wire up the inputs and outputs:
-  reg clk;
-  reg rst_n;
-  reg ena;
-  reg [7:0] ui_in;
-  reg [7:0] uio_in;
-  wire [7:0] uo_out;
-  wire [7:0] uio_out;
-  wire [7:0] uio_oe;
-`ifdef GL_TEST
-  wire VPWR = 1'b1;
-  wire VGND = 1'b0;
-`endif
+    # -----------------------------
+    # Reset sequence
+    # -----------------------------
+    dut.ena.value = 1
+    dut.ui_in.value = 0
+    dut.uio_in.value = 0
+    dut.rst_n.value = 0
 
-  // Replace tt_um_example with your module name:
-  tt_um_example user_project (
+    await Timer(50, unit="ns")
 
-      // Include power ports for the Gate Level test:
-`ifdef GL_TEST
-      .VPWR(VPWR),
-      .VGND(VGND),
-`endif
+    dut.rst_n.value = 1
+    await Timer(50, unit="ns")
 
-      .ui_in  (ui_in),    // Dedicated inputs
-      .uo_out (uo_out),   // Dedicated outputs
-      .uio_in (uio_in),   // IOs: Input path
-      .uio_out(uio_out),  // IOs: Output path
-      .uio_oe (uio_oe),   // IOs: Enable path (active high: 0=input, 1=output)
-      .ena    (ena),      // enable - goes high when design is selected
-      .clk    (clk),      // clock
-      .rst_n  (rst_n)     // not reset
-  );
+    # -----------------------------
+    # Test cases: (d0,d1,d2,d3, sel, expected)
+    # -----------------------------
+    test_cases = [
+        (0,0,0,1, 0, 0),
+        (0,1,0,0, 1, 1),
+        (1,0,0,0, 2, 0),
+        (1,0,0,0, 3, 0),
+        (1,1,1,1, 3, 1),
+        (0,1,1,0, 2, 1),
+    ]
 
-endmodule
+    for d0, d1, d2, d3, sel, expected in test_cases:
+
+        # Pack inputs:
+        # ui_in[0]=d0, [1]=d1, [2]=d2, [3]=d3
+        # [4]=sel0, [5]=sel1
+        sel0 = sel & 1
+        sel1 = (sel >> 1) & 1
+
+        dut.ui_in.value = (
+            (sel1 << 5) |
+            (sel0 << 4) |
+            (d3 << 3) |
+            (d2 << 2) |
+            (d1 << 1) |
+            d0
+        )
+
+        await Timer(20, unit="ns")
+
+        output = int(dut.uo_out.value)
+        actual = output & 1
+
+        assert actual == expected, \
+            f"FAILED: d0={d0} d1={d1} d2={d2} d3={d3} sel={sel} -> got {actual}, expected {expected}"
+
+        dut._log.info(
+            f"PASS: sel={sel} -> output={actual}"
+        )
